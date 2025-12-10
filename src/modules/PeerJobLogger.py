@@ -90,6 +90,7 @@ class PeerJobLogger:
                     db.and_(
                         (self.jobLogTable.c.LogID == LogID if LogID is not None else True),
                         (self.jobLogTable.c.JobID == JobID if JobID is not None else True),
+                        db.or_(self.jobLogTable.c.Status == 0, self.jobLogTable.c.Status == 'false')
                     )
                 )
             )
