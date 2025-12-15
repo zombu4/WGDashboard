@@ -6,7 +6,7 @@ trap 'stop_service' SIGTERM
 
 # Hash password with bcrypt
 hash_password() {
-  python3 -c "import bcrypt; print(bcrypt.hashpw('$1'.encode(), bcrypt.gensalt(12)).decode())"
+  ${WGDASH}/src/venv/bin/python3 -c "import bcrypt; print(bcrypt.hashpw('$1'.encode(), bcrypt.gensalt(12)).decode())"
 }
 
 # Function to set or update section/key/value in the INI file
@@ -22,7 +22,7 @@ set_ini() {
   if grep -q "^[[:space:]]*${key}[[:space:]]*=" "$config_file"; then
     current_value=$(grep "^[[:space:]]*${key}[[:space:]]*=" "$config_file" | cut -d= -f2- | xargs)
 
-    # Don't display actual value if it's a password field
+    # Dont display actual value if it's a password field
     if [[ "$key" == *"password"* ]]; then
       if [ "$current_value" = "$value" ]; then
         echo "- $key is already set correctly (value hidden)"
@@ -189,25 +189,59 @@ start_and_monitor() {
 
   # Actually starting WGDashboard
   echo "Starting WGDashboard directly with Gunicorn..."
-  /opt/wgdashboard/src/venv/bin/python3 ./venv/bin/gunicorn --config ./gunicorn.conf.py
+
+  [[ ! -d ${WGDASH}/src/log ]] && mkdir ${WGDASH}/src/log
+  [[ ! -d ${WGDASH}/src/download ]] && mkdir ${WGDASH}/src/download
+  ${WGDASH}/src/venv/bin/gunicorn --config ${WGDASH}/src/gunicorn.conf.py
+
+  resolvconf -u
+
+  if [ $? -ne 0 ]; then
+    echo "Loading WGDashboard failed... Look above for details."
+  fi
 
   # Wait a second before continuing, to give the python program some time to get ready.
-  sleep 1
   echo -e "\nEnsuring container continuation."
 
-  # Find and monitor log file
-  local logdir="${WGDASH}/src/log"
-  latestErrLog=$(find "$logdir" -name "error_*.log" -type f -print | sort -r | head -n 1)
+  max_rounds="10"
+  round="0"
 
-  # Only tail the logs if they are found
-  if [ -n "$latestErrLog" ]; then
-    tail -f "$latestErrLog" &
-    # Wait for the tail process to end.
-    wait $!
-  else
-    echo "No log files found to tail. Something went wrong, exiting..."
+  # Hang in there for 10s for Gunicorn to get ready
+  while true; do
+    round=$((round + 1))
+    latest_error=$(ls -t ${WGDASH}/src/log/error_*.log 2> /dev/null | head -n 1)
+
+    if [[ $round -eq $max_rounds ]]; then
+      echo "Reached breaking point!"
+      break
+
+    fi
+
+    if [[ -z $latest_error ]]; then
+      echo -e "Logs not yet present! Retrying in 1 second!"
+      sleep 1s
+
+    else
+      break
+
+    fi
+
+  done
+
+  if [[ -z $latest_error ]]; then
+    echo -e "No error logs founds... Please investigate.\nExiting in 3 minutes..."
+    sleep 180s
     exit 1
+
+  else
+    tail -f "$latest_error" &
+    wait $!
+
   fi
+
+  echo "The blocking command has been broken! Script will exit in 3 minutes... Investigate!"
+  sleep 180s
+  exit 1
 }
 
 # Main execution flow
