@@ -496,6 +496,50 @@ class WireguardConfiguration:
                             "time": datetime.now()
                         })
                     )
+
+    def getPeersDailyUsage(self, peer_ids: list[str], day: datetime.date):
+        if not peer_ids:
+            return {}
+        if not self.configurationInfo.PeerTrafficTracking:
+            return {pid: {"total": 0, "sent": 0, "receive": 0} for pid in peer_ids}
+
+        start = datetime(day.year, day.month, day.day, 0, 0, 0, 0)
+        end = start + timedelta(days=1) - timedelta(microseconds=1)
+
+        total_expr = self.peersTransferTable.c.cumu_data + self.peersTransferTable.c.total_data
+        sent_expr = self.peersTransferTable.c.cumu_sent + self.peersTransferTable.c.total_sent
+        receive_expr = self.peersTransferTable.c.cumu_receive + self.peersTransferTable.c.total_receive
+
+        usage = {pid: {"total": 0, "sent": 0, "receive": 0} for pid in peer_ids}
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                sqlalchemy.select(
+                    self.peersTransferTable.c.id.label("id"),
+                    sqlalchemy.func.max(total_expr).label("max_total"),
+                    sqlalchemy.func.min(total_expr).label("min_total"),
+                    sqlalchemy.func.max(sent_expr).label("max_sent"),
+                    sqlalchemy.func.min(sent_expr).label("min_sent"),
+                    sqlalchemy.func.max(receive_expr).label("max_receive"),
+                    sqlalchemy.func.min(receive_expr).label("min_receive"),
+                ).where(
+                    sqlalchemy.and_(
+                        self.peersTransferTable.c.id.in_(peer_ids),
+                        self.peersTransferTable.c.time >= start,
+                        self.peersTransferTable.c.time <= end,
+                    )
+                ).group_by(
+                    self.peersTransferTable.c.id
+                )
+            ).mappings().fetchall()
+        for row in rows:
+            pid = row["id"]
+            if pid in usage:
+                usage[pid] = {
+                    "total": max((row["max_total"] or 0) - (row["min_total"] or 0), 0),
+                    "sent": max((row["max_sent"] or 0) - (row["min_sent"] or 0), 0),
+                    "receive": max((row["max_receive"] or 0) - (row["min_receive"] or 0), 0),
+                }
+        return usage
     
     def logPeersHistoryEndpoint(self):
         with self.engine.begin() as conn:

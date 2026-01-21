@@ -157,3 +157,27 @@ class DashboardClientsPeerAssignment:
                     'peer_configuration_data': p.downloadPeer()
                 })
         return peers
+
+    def GetAssignedPeersDailyUsage(self, ClientID, day: datetime.date = None):
+        self.__getAssignments()
+        if day is None:
+            day = datetime.date.today()
+
+        grouped = {}
+        for a in self.assignments:
+            if a.ClientID == ClientID:
+                grouped.setdefault(a.ConfigurationName, []).append(a.PeerID)
+
+        usage = {}
+        tracking_disabled = []
+        for config_name, peer_ids in grouped.items():
+            config = self.wireguardConfigurations.get(config_name)
+            if config is None:
+                continue
+            if not config.configurationInfo.PeerTrafficTracking:
+                tracking_disabled.append(config_name)
+                for pid in peer_ids:
+                    usage[pid] = {"total": 0, "sent": 0, "receive": 0}
+                continue
+            usage.update(config.getPeersDailyUsage(peer_ids, day))
+        return usage, tracking_disabled

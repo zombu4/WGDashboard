@@ -490,6 +490,41 @@ class DashboardClients:
             return d
         return None
 
+    def GetClientUsageSummary(self, ClientID, day: datetime.date = None):
+        client = self.GetClient(ClientID)
+        if client is None:
+            return None
+        if day is None:
+            day = datetime.date.today()
+
+        peers = self.DashboardClientsPeerAssignment.GetAssignedPeers(ClientID)
+        total = sum(map(lambda x: x.get('data', 0) or 0, peers))
+        sent = sum(map(lambda x: x.get('sent_data', 0) or 0, peers))
+        receive = sum(map(lambda x: x.get('received_data', 0) or 0, peers))
+
+        daily_usage, tracking_disabled = self.DashboardClientsPeerAssignment.GetAssignedPeersDailyUsage(ClientID, day)
+        daily_total = sum(map(lambda x: x.get('total', 0) or 0, daily_usage.values()))
+        daily_sent = sum(map(lambda x: x.get('sent', 0) or 0, daily_usage.values()))
+        daily_receive = sum(map(lambda x: x.get('receive', 0) or 0, daily_usage.values()))
+
+        return {
+            "client_id": ClientID,
+            "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "peers_count": len(peers),
+            "total": {
+                "total_gb": total,
+                "sent_gb": sent,
+                "receive_gb": receive
+            },
+            "daily": {
+                "date": day.strftime("%Y-%m-%d"),
+                "total_gb": daily_total,
+                "sent_gb": daily_sent,
+                "receive_gb": daily_receive
+            },
+            "tracking_disabled_configurations": tracking_disabled
+        }
+
     def AssignClient(self, ConfigurationName, PeerID, ClientID) -> tuple[bool, dict[str, str]] | tuple[bool, None]:
         return self.DashboardClientsPeerAssignment.AssignClient(ClientID, ConfigurationName, PeerID) 
     

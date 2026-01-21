@@ -20,6 +20,7 @@ const client = computed(() => {
 	return assignmentStore.getClientById(route.params.id)
 })
 const clientAssignedPeers = ref({})
+const usageSummary = ref(null)
 const getAssignedPeers = async () => {
 	await fetchGet('/api/clients/assignedPeers', {
 		ClientID: client.value.ClientID
@@ -27,18 +28,32 @@ const getAssignedPeers = async () => {
 		clientAssignedPeers.value = res.data;
 	})
 }
+const getUsageSummary = async () => {
+	await fetchGet('/api/clients/usageSummary', {
+		ClientID: client.value.ClientID
+	}, (res) => {
+		usageSummary.value = res.data;
+	})
+}
 const emits = defineEmits(['deleteSuccess'])
 
 const clientProfile = reactive({
 	Name: undefined
 })
+const formatGB = (v) => {
+	const n = Number(v)
+	if (Number.isNaN(n)) return "0.000"
+	return n.toFixed(3)
+}
 
 if (client.value){
 	watch(() => client.value.ClientID, async () => {
 		clientProfile.Name = client.value.Name;
 		await getAssignedPeers()
+		await getUsageSummary()
 	})
 	await getAssignedPeers()
+	await getUsageSummary()
 	clientProfile.Name = client.value.Name
 }else{
 	router.push('/clients')
@@ -108,6 +123,60 @@ const deleteSuccess = async () => {
 						<i class="bi bi-save-fill"></i>
 					</button>
 				</div>
+			</div>
+		</div>
+		<div class="p-3 border-bottom" v-if="usageSummary">
+			<div class="row g-3">
+				<div class="col-lg-4">
+					<div class="card rounded-3 h-100">
+						<div class="card-body">
+							<small class="text-muted">
+								<LocaleText t="Total Usage"></LocaleText>
+							</small>
+							<div class="h4 mb-1">{{ formatGB(usageSummary.total.total_gb) }} GB</div>
+							<div class="small text-muted">
+								<LocaleText t="Sent"></LocaleText>: {{ formatGB(usageSummary.total.sent_gb) }} GB
+								<span class="mx-2">•</span>
+								<LocaleText t="Received"></LocaleText>: {{ formatGB(usageSummary.total.receive_gb) }} GB
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="col-lg-4">
+					<div class="card rounded-3 h-100">
+						<div class="card-body">
+							<small class="text-muted">
+								<LocaleText t="Today"></LocaleText>
+								<span class="ms-1">({{ usageSummary.daily.date }})</span>
+							</small>
+							<div class="h4 mb-1">{{ formatGB(usageSummary.daily.total_gb) }} GB</div>
+							<div class="small text-muted">
+								<LocaleText t="Sent"></LocaleText>: {{ formatGB(usageSummary.daily.sent_gb) }} GB
+								<span class="mx-2">•</span>
+								<LocaleText t="Received"></LocaleText>: {{ formatGB(usageSummary.daily.receive_gb) }} GB
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="col-lg-4">
+					<div class="card rounded-3 h-100">
+						<div class="card-body">
+							<small class="text-muted">
+								<LocaleText t="Assigned Peers"></LocaleText>
+							</small>
+							<div class="h4 mb-1">{{ usageSummary.peers_count }}</div>
+							<div class="small text-muted">
+								<LocaleText t="Updated"></LocaleText>: {{ usageSummary.generated_at }}
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+			<div class="alert alert-warning mt-3 mb-0 py-2" v-if="usageSummary.tracking_disabled_configurations && usageSummary.tracking_disabled_configurations.length">
+				<small>
+					<LocaleText t="Traffic tracking disabled for"></LocaleText>:
+					{{ usageSummary.tracking_disabled_configurations.join(', ') }}
+				</small>
 			</div>
 		</div>
 		<div style="flex: 1 0 0; overflow-y: scroll;">

@@ -1621,6 +1621,26 @@ def API_Clients_AssignedPeers():
         return ResponseObject(False, "Client does not exist")
     return ResponseObject(data=d)
 
+@app.get(f'{APP_PREFIX}/api/clients/usageSummary')
+def API_Clients_UsageSummary():
+    data = request.args
+    clientId = data.get("ClientID")
+    if not clientId:
+        return ResponseObject(False, "Please provide ClientID")
+    if not DashboardClients.GetClient(clientId):
+        return ResponseObject(False, "Client does not exist")
+    date_str = data.get("date")
+    day = None
+    if date_str:
+        try:
+            day = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except Exception:
+            return ResponseObject(False, "date must be in YYYY-MM-DD format")
+    summary = DashboardClients.GetClientUsageSummary(clientId, day)
+    if summary is None:
+        return ResponseObject(False, "Client does not exist")
+    return ResponseObject(data=summary)
+
 @app.post(f'{APP_PREFIX}/api/clients/generatePasswordResetLink')
 def API_Clients_GeneratePasswordResetLink():
     data = request.get_json()
