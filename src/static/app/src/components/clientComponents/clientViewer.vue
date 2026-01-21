@@ -40,10 +40,13 @@ const emits = defineEmits(['deleteSuccess'])
 const clientProfile = reactive({
 	Name: undefined
 })
-const formatGB = (v) => {
-	const n = Number(v)
-	if (Number.isNaN(n)) return "0.000"
-	return n.toFixed(3)
+const formatUsage = (gb) => {
+	const n = Number(gb)
+	if (!Number.isFinite(n)) return "0 MB"
+	const abs = Math.abs(n)
+	if (abs >= 1024) return `${(n / 1024).toFixed(2)} TB`
+	if (abs >= 1) return `${n.toFixed(2)} GB`
+	return `${(n * 1024).toFixed(2)} MB`
 }
 
 if (client.value){
@@ -133,11 +136,11 @@ const deleteSuccess = async () => {
 							<small class="text-muted">
 								<LocaleText t="Total Usage"></LocaleText>
 							</small>
-							<div class="h4 mb-1">{{ formatGB(usageSummary.total.total_gb) }} GB</div>
+							<div class="h4 mb-1">{{ formatUsage(usageSummary.total.total_gb) }}</div>
 							<div class="small text-muted">
-								<LocaleText t="Sent"></LocaleText>: {{ formatGB(usageSummary.total.sent_gb) }} GB
+								<LocaleText t="Sent"></LocaleText>: {{ formatUsage(usageSummary.total.sent_gb) }}
 								<span class="mx-2">•</span>
-								<LocaleText t="Received"></LocaleText>: {{ formatGB(usageSummary.total.receive_gb) }} GB
+								<LocaleText t="Received"></LocaleText>: {{ formatUsage(usageSummary.total.receive_gb) }}
 							</div>
 						</div>
 					</div>
@@ -149,11 +152,11 @@ const deleteSuccess = async () => {
 								<LocaleText t="Today"></LocaleText>
 								<span class="ms-1">({{ usageSummary.daily.date }})</span>
 							</small>
-							<div class="h4 mb-1">{{ formatGB(usageSummary.daily.total_gb) }} GB</div>
+							<div class="h4 mb-1">{{ formatUsage(usageSummary.daily.total_gb) }}</div>
 							<div class="small text-muted">
-								<LocaleText t="Sent"></LocaleText>: {{ formatGB(usageSummary.daily.sent_gb) }} GB
+								<LocaleText t="Sent"></LocaleText>: {{ formatUsage(usageSummary.daily.sent_gb) }}
 								<span class="mx-2">•</span>
-								<LocaleText t="Received"></LocaleText>: {{ formatGB(usageSummary.daily.receive_gb) }} GB
+								<LocaleText t="Received"></LocaleText>: {{ formatUsage(usageSummary.daily.receive_gb) }}
 							</div>
 						</div>
 					</div>
