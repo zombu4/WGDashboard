@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 
 import sqlalchemy
 from jinja2 import Template
-from flask import Flask, request, render_template, session, send_file
+from flask import Flask, request, render_template, session, send_file, make_response
 from flask_cors import CORS
 from icmplib import ping, traceroute
 from flask.json.provider import DefaultJSONProvider
@@ -1718,7 +1718,10 @@ Index Page
 
 @app.get(f'{APP_PREFIX}/')
 def index():
-    return render_template('index.html')
+    resp = make_response(render_template('index.html'))
+    resp.headers["Cache-Control"] = "no-store, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 if __name__ == "__main__":
     startThreads()
