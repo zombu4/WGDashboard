@@ -49,6 +49,7 @@ export default defineConfig(({mode}) => {
 			host: '0.0.0.0'
 		},
 		build: {
+			emptyOutDir: false,
 			target: "es2022",
 			outDir: '../dist/WGDashboardAdmin',
 			rollupOptions: {
