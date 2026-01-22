@@ -29,7 +29,9 @@ const route = useRoute()
 const configurationInfo = ref({})
 const configurationPeers = ref([])
 const realtimeRates = ref({})
+const realtimeHistory = ref({})
 const rateUnit = ref(window.localStorage.getItem('wgdashboard_rate_unit') || 'Mbps')
+const maxRateSamples = 30
 const configurationToggling = ref(false)
 const configurationModalSelectedPeer = ref({})
 const configurationModals = ref({
@@ -108,6 +110,25 @@ const fetchRealtimeRates = async () => {
 	}, (res) => {
 		if (res.status){
 			realtimeRates.value = res.data || {}
+			const peerIds = new Set(configurationPeers.value.map(p => p.id))
+			peerIds.forEach((peerId) => {
+				if (!realtimeHistory.value[peerId]){
+					realtimeHistory.value[peerId] = { sent: [], recv: [] }
+				}
+				const rate = realtimeRates.value[peerId] || {}
+				const sent = Number(rate.sent_bps || 0)
+				const recv = Number(rate.recv_bps || 0)
+				const history = realtimeHistory.value[peerId]
+				history.sent.push(sent)
+				history.recv.push(recv)
+				if (history.sent.length > maxRateSamples) history.sent.shift()
+				if (history.recv.length > maxRateSamples) history.recv.shift()
+			})
+			Object.keys(realtimeHistory.value).forEach((peerId) => {
+				if (!peerIds.has(peerId)){
+					delete realtimeHistory.value[peerId]
+				}
+			})
 		}
 	})
 }
@@ -464,6 +485,7 @@ watch(() => route.query.id, (newValue) => {
 			     v-for="(peer, order) in searchPeers">
 				<Peer :Peer="peer"
 					  :Rate="realtimeRates[peer.id]"
+					  :RateHistory="realtimeHistory[peer.id]"
 					  :RateUnit="rateUnit"
 					  :searchPeersLength="searchPeers.length"
 					  :order="order"

@@ -11,6 +11,7 @@ import LocaleText from "@/components/text/localeText.vue";
 import ClientAssignedPeers from "@/components/clientComponents/clientAssignedPeers.vue";
 import ClientResetPassword from "@/components/clientComponents/clientResetPassword.vue";
 import ClientDelete from "@/components/clientComponents/clientDelete.vue";
+import Sparkline from "@/components/visualComponents/sparkline.vue";
 const assignmentStore = DashboardClientAssignmentStore()
 const dashboardConfigurationStore = DashboardConfigurationStore()
 
@@ -22,7 +23,9 @@ const client = computed(() => {
 const clientAssignedPeers = ref({})
 const usageSummary = ref(null)
 const realtimeUsage = ref({sent_bps: 0, recv_bps: 0, updated_at: null})
+const realtimeHistory = ref({sent: [], recv: []})
 const rateUnit = ref(window.localStorage.getItem('wgdashboard_rate_unit') || 'Mbps')
+const maxRateSamples = 30
 const getAssignedPeers = async () => {
 	await fetchGet('/api/clients/assignedPeers', {
 		ClientID: client.value.ClientID
@@ -42,6 +45,12 @@ const getRealtimeUsage = async () => {
 		ClientID: client.value.ClientID
 	}, (res) => {
 		realtimeUsage.value = res.data || {sent_bps: 0, recv_bps: 0, updated_at: null}
+		const sent = Number(realtimeUsage.value.sent_bps || 0)
+		const recv = Number(realtimeUsage.value.recv_bps || 0)
+		realtimeHistory.value.sent.push(sent)
+		realtimeHistory.value.recv.push(recv)
+		if (realtimeHistory.value.sent.length > maxRateSamples) realtimeHistory.value.sent.shift()
+		if (realtimeHistory.value.recv.length > maxRateSamples) realtimeHistory.value.recv.shift()
 	})
 }
 const emits = defineEmits(['deleteSuccess'])
@@ -71,6 +80,7 @@ const updateRateUnit = (e) => {
 
 if (client.value){
 	watch(() => client.value.ClientID, async () => {
+		realtimeHistory.value = {sent: [], recv: []}
 		clientProfile.Name = client.value.Name;
 		await getAssignedPeers()
 		await getUsageSummary()
@@ -227,6 +237,14 @@ onBeforeUnmount(() => {
 							</div>
 							<div class="h6 text-muted mb-0">
 								{{ formatRate(realtimeUsage.sent_bps) }} ↑
+							</div>
+							<div class="mt-2">
+								<Sparkline
+									:recv="realtimeHistory.recv"
+									:sent="realtimeHistory.sent"
+									:width="160"
+									:height="34"
+								/>
 							</div>
 							<div class="small text-muted mt-1">
 								<LocaleText t="Updated"></LocaleText>: {{ realtimeUsage.updated_at || '—' }}

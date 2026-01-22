@@ -7,6 +7,7 @@ import LocaleText from "@/components/text/localeText.vue";
 import {DashboardConfigurationStore} from "@/stores/DashboardConfigurationStore.js";
 import {GetLocale} from "@/utilities/locale.js";
 import PeerTagBadge from "@/components/configurationComponents/peerTagBadge.vue";
+import Sparkline from "@/components/visualComponents/sparkline.vue";
 
 export default {
 	name: "peer",
@@ -21,10 +22,10 @@ export default {
 		}
 	},
 	components: {
-		PeerTagBadge, LocaleText, PeerSettingsDropdown
+		PeerTagBadge, LocaleText, PeerSettingsDropdown, Sparkline
 	},
 	props: {
-		Peer: Object, ConfigurationInfo: Object, order: Number, searchPeersLength: Number, Rate: Object, RateUnit: String
+		Peer: Object, ConfigurationInfo: Object, order: Number, searchPeersLength: Number, Rate: Object, RateHistory: Object, RateUnit: String
 	},
 	setup(){
 		const target = ref(null);
@@ -76,9 +77,18 @@ export default {
 						<i class="bi bi-arrow-up"></i><strong>
 						{{(Peer.cumu_sent + Peer.total_sent).toFixed(4)}}</strong> GB
 					</span>
-					<span class="text-muted">
+					<span class="text-muted d-flex align-items-center gap-2">
 						<i class="bi bi-speedometer2"></i>
-						{{ formatRate(Rate?.recv_bps) }} ↓ / {{ formatRate(Rate?.sent_bps) }} ↑
+						<Sparkline
+							v-if="dashboardStore.Configuration.Server.dashboard_peer_list_display === 'list'"
+							:recv="RateHistory?.recv || []"
+							:sent="RateHistory?.sent || []"
+							:width="90"
+							:height="22"
+						/>
+						<span>
+							{{ formatRate(Rate?.recv_bps) }} ↓ / {{ formatRate(Rate?.sent_bps) }} ↑
+						</span>
 					</span>
 					<span class="text-secondary" v-if="Peer.latest_handshake !== 'No Handshake'">
 						<i class="bi bi-arrows-angle-contract"></i>
