@@ -206,6 +206,12 @@ const serviceBadgeClass = (svc) => {
 							<span class="text-muted">{{ data?.adguard_query_stats?.last_entry || "-" }}</span>
 						</li>
 					</ul>
+					<div
+						v-if="data?.adguard_query_stats && (data.adguard_query_stats.status === 'ok' || data.adguard_query_stats.status === 'empty') && (data.adguard_query_stats.total || 0) === 0"
+						class="text-muted mt-2"
+					>
+						<LocaleText t="No queries in last window"></LocaleText>
+					</div>
 				</div>
 				<div v-else class="card-body text-muted">
 					<span class="spinner-border spinner-border-sm me-2"></span>
