@@ -10,12 +10,21 @@ import PeerTagBadge from "@/components/configurationComponents/peerTagBadge.vue"
 
 export default {
 	name: "peer",
-	methods: {GetLocale},
+	methods: {
+		GetLocale,
+		formatRate(bps){
+			const v = Number(bps || 0)
+			if (this.RateUnit === 'MB/s'){
+				return `${(v / 1000000).toFixed(2)} MB/s`
+			}
+			return `${(v * 8 / 1000000).toFixed(2)} Mbps`
+		}
+	},
 	components: {
 		PeerTagBadge, LocaleText, PeerSettingsDropdown
 	},
 	props: {
-		Peer: Object, ConfigurationInfo: Object, order: Number, searchPeersLength: Number
+		Peer: Object, ConfigurationInfo: Object, order: Number, searchPeersLength: Number, Rate: Object, RateUnit: String
 	},
 	setup(){
 		const target = ref(null);
@@ -66,6 +75,10 @@ export default {
 					<span class="text-success">
 						<i class="bi bi-arrow-up"></i><strong>
 						{{(Peer.cumu_sent + Peer.total_sent).toFixed(4)}}</strong> GB
+					</span>
+					<span class="text-muted">
+						<i class="bi bi-speedometer2"></i>
+						{{ formatRate(Rate?.recv_bps) }} ↓ / {{ formatRate(Rate?.sent_bps) }} ↑
 					</span>
 					<span class="text-secondary" v-if="Peer.latest_handshake !== 'No Handshake'">
 						<i class="bi bi-arrows-angle-contract"></i>

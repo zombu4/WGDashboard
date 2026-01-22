@@ -28,6 +28,8 @@ const wireguardConfigurationStore = WireguardConfigurationsStore()
 const route = useRoute()
 const configurationInfo = ref({})
 const configurationPeers = ref([])
+const realtimeRates = ref({})
+const rateUnit = ref(window.localStorage.getItem('wgdashboard_rate_unit') || 'Mbps')
 const configurationToggling = ref(false)
 const configurationModalSelectedPeer = ref({})
 const configurationModals = ref({
@@ -101,6 +103,28 @@ const fetchPeerList = async () => {
 	})
 }
 await fetchPeerList()
+await fetchRealtimeRates()
+
+const fetchRealtimeRates = async () => {
+	await fetchGet("/api/getWireguardConfigurationPeerRates", {
+		configurationName: route.params.id
+	}, (res) => {
+		if (res.status){
+			realtimeRates.value = res.data || {}
+		}
+	})
+}
+const updateRateUnit = (e) => {
+	rateUnit.value = e.target.value
+	window.localStorage.setItem('wgdashboard_rate_unit', rateUnit.value)
+}
+const formatRate = (bps) => {
+	const v = Number(bps || 0)
+	if (rateUnit.value === 'MB/s'){
+		return `${(v / 1_000_000).toFixed(2)} MB/s`
+	}
+	return `${(v * 8 / 1_000_000).toFixed(2)} Mbps`
+}
 
 // Fetch Peer Interval =====================================
 const fetchPeerListInterval = ref(undefined)
@@ -111,9 +135,19 @@ const setFetchPeerListInterval = () => {
 	},  parseInt(dashboardStore.Configuration.Server.dashboard_refresh_interval))
 }
 setFetchPeerListInterval()
+const fetchRealtimeRatesInterval = ref(undefined)
+const setFetchRealtimeRatesInterval = () => {
+	clearInterval(fetchRealtimeRatesInterval.value)
+	fetchRealtimeRatesInterval.value = setInterval(async () => {
+		await fetchRealtimeRates()
+	}, 5000)
+}
+setFetchRealtimeRatesInterval()
 onBeforeUnmount(() => {
 	clearInterval(fetchPeerListInterval.value);
 	fetchPeerListInterval.value = undefined;
+	clearInterval(fetchRealtimeRatesInterval.value);
+	fetchRealtimeRatesInterval.value = undefined;
 	wireguardConfigurationStore.Filter.HiddenTags = []
 })
 
@@ -337,6 +371,15 @@ watch(() => route.query.id, (newValue) => {
 		</div>
 	</div>
 	<div class="row gx-2 gy-2 mb-2">
+		<div class="col-12">
+			<div class="d-flex justify-content-end align-items-center gap-2">
+				<small class="text-muted"><LocaleText t="Realtime Units"></LocaleText></small>
+				<select class="form-select form-select-sm w-auto" @change="updateRateUnit">
+					<option value="Mbps" :selected="rateUnit === 'Mbps'">Mbps</option>
+					<option value="MB/s" :selected="rateUnit === 'MB/s'">MB/s</option>
+				</select>
+			</div>
+		</div>
 		<div class="col-12 col-lg-3">
 			<div class="card rounded-3 bg-transparent  h-100">
 				<div class="card-body d-flex">
@@ -360,6 +403,12 @@ watch(() => route.query.id, (newValue) => {
 							<LocaleText t="Total Usage"></LocaleText>
 						</small></p>
 						<strong class="h4">{{configurationSummary.totalUsage}} GB</strong>
+						<div class="small text-muted">
+							<LocaleText t="Realtime"></LocaleText>:
+							{{ formatRate(Object.values(realtimeRates).reduce((a,b)=>a+(b?.recv_bps||0),0)) }} ↓
+							<span class="mx-1">/</span>
+							{{ formatRate(Object.values(realtimeRates).reduce((a,b)=>a+(b?.sent_bps||0),0)) }} ↑
+						</div>
 					</div>
 					<i class="bi bi-arrow-down-up ms-auto h2 text-muted"></i>
 				</div>
@@ -415,6 +464,8 @@ watch(() => route.query.id, (newValue) => {
 			     :key="peer.id"
 			     v-for="(peer, order) in searchPeers">
 				<Peer :Peer="peer"
+					  :Rate="realtimeRates[peer.id]"
+					  :RateUnit="rateUnit"
 					  :searchPeersLength="searchPeers.length"
 					  :order="order"
 					  :ConfigurationInfo="configurationInfo"

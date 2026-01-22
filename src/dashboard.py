@@ -1027,6 +1027,14 @@ def API_getConfigurationInfo():
         "configurationRestrictedPeers": WireguardConfigurations[configurationName].getRestrictedPeersList()
     })
 
+@app.get(f'{APP_PREFIX}/api/getWireguardConfigurationPeerRates')
+def API_getWireguardConfigurationPeerRates():
+    configurationName = request.args.get("configurationName")
+    if not configurationName or configurationName not in WireguardConfigurations.keys():
+        return ResponseObject(False, "Please provide configuration name")
+    rates = WireguardConfigurations[configurationName].getPeersRealtimeRates()
+    return ResponseObject(data=rates)
+
 @app.get(f'{APP_PREFIX}/api/getPeerHistoricalEndpoints')
 def API_GetPeerHistoricalEndpoints():
     configurationName = request.args.get("configurationName")
@@ -1640,6 +1648,40 @@ def API_Clients_UsageSummary():
     if summary is None:
         return ResponseObject(False, "Client does not exist")
     return ResponseObject(data=summary)
+
+@app.get(f'{APP_PREFIX}/api/clients/realtimeUsage')
+def API_Clients_RealtimeUsage():
+    data = request.args
+    clientId = data.get("ClientID")
+    if not clientId:
+        return ResponseObject(False, "Please provide ClientID")
+    if not DashboardClients.GetClient(clientId):
+        return ResponseObject(False, "Client does not exist")
+    peers = DashboardClients.DashboardClientsPeerAssignment.GetAssignedPeers(clientId)
+    if not peers:
+        return ResponseObject(data={"sent_bps": 0, "recv_bps": 0, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+
+    configs = {}
+    for p in peers:
+        configs.setdefault(p.get("configuration_name"), []).append(p.get("id"))
+
+    total_sent = 0.0
+    total_recv = 0.0
+    for cfg, peer_ids in configs.items():
+        config = WireguardConfigurations.get(cfg)
+        if config is None:
+            continue
+        rates = config.getPeersRealtimeRates()
+        for pid in peer_ids:
+            r = rates.get(pid, {})
+            total_sent += float(r.get("sent_bps", 0) or 0)
+            total_recv += float(r.get("recv_bps", 0) or 0)
+
+    return ResponseObject(data={
+        "sent_bps": total_sent,
+        "recv_bps": total_recv,
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
 
 @app.post(f'{APP_PREFIX}/api/clients/generatePasswordResetLink')
 def API_Clients_GeneratePasswordResetLink():
