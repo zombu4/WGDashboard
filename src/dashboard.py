@@ -1,7 +1,7 @@
 import logging
 import csv
 from io import StringIO
-import random, shutil, sqlite3, configparser, hashlib, ipaddress, json, os, secrets, subprocess
+import random, shutil, sqlite3, configparser, hashlib, ipaddress, json, os, secrets, subprocess, ssl
 import time, re, uuid, bcrypt, psutil, pyotp, threading
 import traceback
 from uuid import uuid4
@@ -26,6 +26,7 @@ from modules.Utilities import (
 from packaging import version
 from modules.Email import EmailSender
 from modules.DashboardLogger import DashboardLogger
+from modules.AuditLogger import AuditLogger
 from modules.PeerJob import PeerJob
 from modules.SystemStatus import SystemStatus
 from modules.PeerShareLinks import PeerShareLinks
@@ -86,6 +87,145 @@ def ParseDateRange(args, max_days: int = 366):
     if (end - start).days + 1 > max_days:
         return False, f"Date range too large (max {max_days} days)", None
     return True, None, (start, end)
+
+ADGUARD_CONFIG_PATH = os.environ.get(
+    "ADGUARD_CONFIG_PATH",
+    "/usr/local/bin/AdGuardHome/AdGuardHome/AdGuardHome.yaml"
+)
+
+def _read_adguard_config():
+    data = {
+        "path": ADGUARD_CONFIG_PATH,
+        "http_address": None,
+        "dns_bind_hosts": [],
+        "dns_port": None,
+        "tls_enabled": None,
+        "tls_server_name": None,
+        "tls_port_https": None,
+        "certificate_path": None,
+        "private_key_path": None,
+        "error": None,
+    }
+    if not os.path.isfile(ADGUARD_CONFIG_PATH):
+        data["error"] = "Config not found"
+        return data
+    try:
+        with open(ADGUARD_CONFIG_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        data["http_address"] = _parse_block_key(lines, "http", "address")
+        data["dns_port"] = _parse_block_key(lines, "dns", "port")
+        data["dns_bind_hosts"] = _parse_block_list(lines, "dns", "bind_hosts")
+        data["tls_enabled"] = _parse_block_key(lines, "tls", "enabled")
+        data["tls_server_name"] = _parse_block_key(lines, "tls", "server_name")
+        data["tls_port_https"] = _parse_block_key(lines, "tls", "port_https")
+        data["certificate_path"] = _parse_block_key(lines, "tls", "certificate_path")
+        data["private_key_path"] = _parse_block_key(lines, "tls", "private_key_path")
+    except Exception as e:
+        data["error"] = str(e)
+    return data
+
+def _parse_block_key(lines, block_name, key):
+    in_block = False
+    for line in lines:
+        if not line.strip():
+            continue
+        if not line.startswith(" "):
+            in_block = line.startswith(f"{block_name}:")
+            continue
+        if not in_block:
+            continue
+        stripped = line.strip()
+        if stripped.startswith(f"{key}:"):
+            value = stripped.split(":", 1)[1].strip()
+            return value.strip('"').strip("'")
+    return None
+
+def _parse_block_list(lines, block_name, key):
+    values = []
+    in_block = False
+    in_list = False
+    for line in lines:
+        if not line.strip():
+            continue
+        if not line.startswith(" "):
+            in_block = line.startswith(f"{block_name}:")
+            in_list = False
+            continue
+        if not in_block:
+            continue
+        stripped = line.strip()
+        if stripped.startswith(f"{key}:"):
+            in_list = True
+            continue
+        if in_list:
+            if stripped.startswith("- "):
+                values.append(stripped[2:].strip().strip('"').strip("'"))
+            else:
+                break
+    return values
+
+def _service_status(service_name):
+    data = {
+        "name": service_name,
+        "active": False,
+        "enabled": False,
+        "status": "unknown",
+        "enabled_state": "unknown",
+        "since": None,
+        "error": None,
+    }
+    try:
+        active = subprocess.run(
+            ["systemctl", "is-active", service_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        enabled = subprocess.run(
+            ["systemctl", "is-enabled", service_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        data["status"] = active or "unknown"
+        data["enabled_state"] = enabled or "unknown"
+        data["active"] = active == "active"
+        data["enabled"] = enabled == "enabled"
+        show = subprocess.run(
+            ["systemctl", "show", service_name, "-p", "ActiveEnterTimestamp"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        if "=" in show:
+            data["since"] = show.split("=", 1)[1].strip()
+    except Exception as e:
+        data["error"] = str(e)
+    return data
+
+def _cert_expiry(cert_path):
+    if not cert_path:
+        return {"path": None, "status": "missing"}
+    if not os.path.isfile(cert_path):
+        return {"path": cert_path, "status": "missing"}
+    try:
+        info = ssl._ssl._test_decode_cert(cert_path)
+        not_after = info.get("notAfter")
+        if not not_after:
+            return {"path": cert_path, "status": "unknown"}
+        expires_at = datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+        days_remaining = (expires_at - datetime.utcnow()).days
+        return {
+            "path": cert_path,
+            "status": "ok",
+            "not_after": expires_at.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "days_remaining": days_remaining,
+        }
+    except Exception as e:
+        return {"path": cert_path, "status": "error", "error": str(e)}
 
 '''
 Flask App
@@ -216,6 +356,7 @@ with app.app_context():
     AllPeerShareLinks: PeerShareLinks = PeerShareLinks(DashboardConfig, WireguardConfigurations)
     AllPeerJobs: PeerJobs = PeerJobs(DashboardConfig, WireguardConfigurations, AllPeerShareLinks)
     DashboardLogger: DashboardLogger = DashboardLogger()
+    AuditLogger: AuditLogger = AuditLogger()
     DashboardPlugins: DashboardPlugins = DashboardPlugins(app, WireguardConfigurations)
     DashboardWebHooks: DashboardWebHooks = DashboardWebHooks(DashboardConfig)
     NewConfigurationTemplates: NewConfigurationTemplates = NewConfigurationTemplates()
@@ -261,6 +402,7 @@ def auth_req():
                 response.content_type = "application/json"
                 response.status_code = 401
                 return response
+
             DashboardConfig.APIAccessed = True
         else:
             DashboardConfig.APIAccessed = False
@@ -284,6 +426,48 @@ def auth_req():
                 response.content_type = "application/json"
                 response.status_code = 401
                 return response
+
+@app.after_request
+def audit_req(response):
+    try:
+        if request.path.startswith(f"{APP_PREFIX}/api") and request.method in ("POST", "PUT", "DELETE"):
+            if "authenticate" in request.path:
+                return response
+            actor = session.get("account_username") or session.get("username") or "admin"
+            if DashboardConfig.APIAccessed:
+                actor = "api-key"
+            message_parts = []
+            payload = request.get_json(silent=True) or {}
+            for key in ("ConfigurationName", "configurationName"):
+                if key in payload:
+                    message_parts.append(f"config={payload.get(key)}")
+                    break
+            peers = payload.get("Peers") or payload.get("peers")
+            if isinstance(peers, list):
+                message_parts.append(f"peers={len(peers)}")
+            peer = payload.get("Peer") or payload.get("peer")
+            if isinstance(peer, dict) and peer.get("name"):
+                message_parts.append(f"peer={peer.get('name')}")
+            for key in ("ClientID", "clientId"):
+                if key in payload:
+                    message_parts.append(f"client={payload.get(key)}")
+                    break
+            if message_parts:
+                message = " ".join(message_parts)
+            else:
+                message = ""
+            AuditLogger.log(
+                Actor=str(actor),
+                IP=str(request.remote_addr),
+                Method=str(request.method),
+                Path=str(request.path),
+                StatusCode=int(response.status_code),
+                Result=("true" if response.status_code < 400 else "false"),
+                Message=message,
+            )
+    except Exception:
+        pass
+    return response
 
 @app.route(f'{APP_PREFIX}/api/handshake', methods=["GET", "OPTIONS"])
 def API_Handshake():
@@ -329,6 +513,7 @@ def API_AuthenticateLogin():
         authToken = hashlib.sha256(f"{data['username']}{datetime.now()}".encode()).hexdigest()
         session['role'] = 'admin'
         session['username'] = authToken
+        session['account_username'] = data['username']
         resp = ResponseObject(True, DashboardConfig.GetConfig("Other", "welcome_session")[1])
         resp.set_cookie("authToken", authToken)
         session.permanent = True
@@ -1618,6 +1803,49 @@ def API_Email_PreviewBody():
 @app.get(f'{APP_PREFIX}/api/systemStatus')
 def API_SystemStatus():
     return ResponseObject(data=SystemStatus)
+
+@app.get(f'{APP_PREFIX}/api/healthStatus')
+def API_HealthStatus():
+    adguard_config = _read_adguard_config()
+    cert_info = _cert_expiry(adguard_config.get("certificate_path"))
+    disk_root = psutil.disk_usage("/")
+    data = {
+        "services": {
+            "wg_dashboard": _service_status("wg-dashboard"),
+            "wireguard": _service_status("wg-quick@wg0"),
+            "adguard": _service_status("AdGuardHome"),
+        },
+        "adguard": {
+            "http_address": adguard_config.get("http_address"),
+            "dns_bind_hosts": adguard_config.get("dns_bind_hosts"),
+            "dns_port": adguard_config.get("dns_port"),
+            "tls_enabled": adguard_config.get("tls_enabled"),
+            "tls_server_name": adguard_config.get("tls_server_name"),
+            "tls_port_https": adguard_config.get("tls_port_https"),
+            "config_path": adguard_config.get("path"),
+            "error": adguard_config.get("error"),
+        },
+        "certificate": cert_info,
+        "disk": {
+            "mount": "/",
+            "total": disk_root.total,
+            "used": disk_root.used,
+            "free": disk_root.free,
+            "percent": disk_root.percent,
+        },
+    }
+    return ResponseObject(data=data)
+
+@app.get(f'{APP_PREFIX}/api/auditLog')
+def API_AuditLog():
+    limit = request.args.get("limit", 200)
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 200
+    if limit > 1000:
+        limit = 1000
+    return ResponseObject(data=AuditLogger.get_logs(limit))
 
 @app.get(f'{APP_PREFIX}/api/protocolsEnabled')
 def API_ProtocolsEnabled():

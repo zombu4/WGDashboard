@@ -129,8 +129,18 @@ export default {
 				</h6>
 				<ul class="nav flex-column px-2 gap-1">
 					<li class="nav-item">
+						<RouterLink to="/health" class="nav-link rounded-3" active-class="active">
+							<LocaleText t="Health"></LocaleText>
+						</RouterLink>
+					</li>
+					<li class="nav-item">
 						<RouterLink to="/system_status" class="nav-link rounded-3" active-class="active">
 							<LocaleText t="System Status"></LocaleText>
+						</RouterLink>
+					</li>
+					<li class="nav-item">
+						<RouterLink to="/audit_log" class="nav-link rounded-3" active-class="active">
+							<LocaleText t="Audit Log"></LocaleText>
 						</RouterLink>
 					</li>
 					<li class="nav-item">

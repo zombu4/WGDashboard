@@ -106,6 +106,22 @@ const router = createRouter({
 					}
 				},
 				{
+					name: "Health",
+					path: 'health',
+					component: () => import("@/views/health.vue"),
+					meta: {
+						title: "Health"
+					}
+				},
+				{
+					name: "Audit Log",
+					path: 'audit_log',
+					component: () => import("@/views/auditLog.vue"),
+					meta: {
+						title: "Audit Log"
+					}
+				},
+				{
 					name: "Clients",
 					path: 'clients',
 					component: () => import("@/views/clients.vue"),
