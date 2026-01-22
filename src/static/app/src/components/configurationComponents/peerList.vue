@@ -102,9 +102,6 @@ const fetchPeerList = async () => {
 		}
 	})
 }
-await fetchPeerList()
-await fetchRealtimeRates()
-
 const fetchRealtimeRates = async () => {
 	await fetchGet("/api/getWireguardConfigurationPeerRates", {
 		configurationName: route.params.id
@@ -114,6 +111,8 @@ const fetchRealtimeRates = async () => {
 		}
 	})
 }
+await fetchPeerList()
+await fetchRealtimeRates()
 const updateRateUnit = (e) => {
 	rateUnit.value = e.target.value
 	window.localStorage.setItem('wgdashboard_rate_unit', rateUnit.value)
