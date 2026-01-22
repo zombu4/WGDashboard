@@ -473,5 +473,18 @@
 	"Audit Log": "",
 	"Actor": "",
 	"Action": "",
-	"Result": ""
+	"Result": "",
+	"WireGuard": "",
+	"Configuration": "",
+	"AdGuard Query Stats": "",
+	"Window (minutes)": "",
+	"Total Queries": "",
+	"Blocked": "",
+	"Last Entry": "",
+	"Certificate Renewal": "",
+	"Method": "",
+	"Timer": "",
+	"Next Run": "",
+	"Last Run": "",
+	"Connected": ""
 }

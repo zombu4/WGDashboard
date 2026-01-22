@@ -6,7 +6,7 @@ import time, re, uuid, bcrypt, psutil, pyotp, threading
 import traceback
 from uuid import uuid4
 from zipfile import ZipFile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import sqlalchemy
 from jinja2 import Template
@@ -96,6 +96,7 @@ ADGUARD_CONFIG_PATH = os.environ.get(
 def _read_adguard_config():
     data = {
         "path": ADGUARD_CONFIG_PATH,
+        "data_dir": None,
         "http_address": None,
         "dns_bind_hosts": [],
         "dns_port": None,
@@ -104,12 +105,19 @@ def _read_adguard_config():
         "tls_port_https": None,
         "certificate_path": None,
         "private_key_path": None,
+        "querylog_enabled": None,
+        "querylog_file_enabled": None,
+        "statistics_enabled": None,
+        "statistics_interval": None,
+        "querylog_path": None,
         "error": None,
     }
     if not os.path.isfile(ADGUARD_CONFIG_PATH):
         data["error"] = "Config not found"
         return data
     try:
+        data["data_dir"] = os.path.join(os.path.dirname(ADGUARD_CONFIG_PATH), "data")
+        data["querylog_path"] = os.path.join(data["data_dir"], "querylog.json")
         with open(ADGUARD_CONFIG_PATH, "r", encoding="utf-8") as f:
             lines = f.readlines()
         data["http_address"] = _parse_block_key(lines, "http", "address")
@@ -120,6 +128,10 @@ def _read_adguard_config():
         data["tls_port_https"] = _parse_block_key(lines, "tls", "port_https")
         data["certificate_path"] = _parse_block_key(lines, "tls", "certificate_path")
         data["private_key_path"] = _parse_block_key(lines, "tls", "private_key_path")
+        data["querylog_enabled"] = _parse_block_key(lines, "querylog", "enabled")
+        data["querylog_file_enabled"] = _parse_block_key(lines, "querylog", "file_enabled")
+        data["statistics_enabled"] = _parse_block_key(lines, "statistics", "enabled")
+        data["statistics_interval"] = _parse_block_key(lines, "statistics", "interval")
     except Exception as e:
         data["error"] = str(e)
     return data
@@ -226,6 +238,125 @@ def _cert_expiry(cert_path):
         }
     except Exception as e:
         return {"path": cert_path, "status": "error", "error": str(e)}
+
+def _tail_lines(path, max_lines=2000, max_bytes=2 * 1024 * 1024):
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            data = b""
+            block_size = 8192
+            while size > 0 and data.count(b"\n") <= max_lines and len(data) < max_bytes:
+                read_size = block_size if size >= block_size else size
+                f.seek(size - read_size)
+                data = f.read(read_size) + data
+                size -= read_size
+            lines = data.splitlines()
+            if len(lines) > max_lines:
+                lines = lines[-max_lines:]
+            return [line.decode("utf-8", errors="ignore") for line in lines]
+    except Exception:
+        return []
+
+def _adguard_query_stats(querylog_path, window_minutes=60, max_lines=2000):
+    stats = {
+        "status": "unavailable",
+        "window_minutes": window_minutes,
+        "total": 0,
+        "blocked": 0,
+        "blocked_percent": 0,
+        "last_entry": None,
+        "file_size": None,
+    }
+    if not querylog_path or not os.path.isfile(querylog_path):
+        stats["status"] = "missing"
+        return stats
+    try:
+        stats["file_size"] = os.path.getsize(querylog_path)
+        lines = _tail_lines(querylog_path, max_lines=max_lines)
+        if not lines:
+            stats["status"] = "empty"
+            return stats
+        cutoff = datetime.now(tz=timezone.utc) - timedelta(minutes=window_minutes)
+        total = 0
+        blocked = 0
+        last_ts = None
+        for line in lines:
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                ts_raw = entry.get("T")
+                if ts_raw:
+                    ts = datetime.fromisoformat(ts_raw)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    if last_ts is None or ts > last_ts:
+                        last_ts = ts
+                    if ts >= cutoff:
+                        total += 1
+                        result = entry.get("Result") or {}
+                        if result.get("IsFiltered") is True:
+                            blocked += 1
+            except Exception:
+                continue
+        stats["status"] = "ok"
+        stats["total"] = total
+        stats["blocked"] = blocked
+        stats["blocked_percent"] = round((blocked / total) * 100, 2) if total > 0 else 0
+        if last_ts:
+            stats["last_entry"] = last_ts.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return stats
+    except Exception as e:
+        stats["status"] = "error"
+        stats["error"] = str(e)
+        return stats
+
+def _cert_renewal_status():
+    status = {
+        "method": "none",
+        "timer_unit": None,
+        "active": None,
+        "next_run": None,
+        "last_run": None,
+        "error": None,
+    }
+    timer_units = ["certbot.timer", "certbot-renew.timer", "certbot_renew.timer"]
+    for unit in timer_units:
+        proc = subprocess.run(
+            ["systemctl", "show", unit, "-p", "LoadState", "-p", "ActiveState",
+             "-p", "NextElapseUSecRealtime", "-p", "LastTriggerUSecRealtime"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if "LoadState=loaded" in proc.stdout:
+            props = {}
+            for line in proc.stdout.splitlines():
+                if "=" in line:
+                    key, val = line.split("=", 1)
+                    props[key] = val
+            status["method"] = "systemd"
+            status["timer_unit"] = unit
+            status["active"] = props.get("ActiveState")
+            status["next_run"] = props.get("NextElapseUSecRealtime")
+            status["last_run"] = props.get("LastTriggerUSecRealtime")
+            return status
+    cron_path = "/etc/cron.d/certbot"
+    if os.path.isfile(cron_path):
+        try:
+            with open(cron_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        status["method"] = "cron"
+                        status["next_run"] = line
+                        status["timer_unit"] = cron_path
+                        return status
+        except Exception as e:
+            status["error"] = str(e)
+    return status
 
 '''
 Flask App
@@ -456,7 +587,7 @@ def audit_req(response):
                 message = " ".join(message_parts)
             else:
                 message = ""
-            AuditLogger.log(
+            result = AuditLogger.log(
                 Actor=str(actor),
                 IP=str(request.remote_addr),
                 Method=str(request.method),
@@ -465,6 +596,8 @@ def audit_req(response):
                 Result=("true" if response.status_code < 400 else "false"),
                 Message=message,
             )
+            if not result:
+                current_app.logger.error("Audit log insert failed")
     except Exception:
         pass
     return response
@@ -1808,12 +1941,35 @@ def API_SystemStatus():
 def API_HealthStatus():
     adguard_config = _read_adguard_config()
     cert_info = _cert_expiry(adguard_config.get("certificate_path"))
+    cert_renewal = _cert_renewal_status()
     disk_root = psutil.disk_usage("/")
+    wg_configs = []
+    total_peers = 0
+    total_connected = 0
+    for name, cfg in WireguardConfigurations.items():
+        try:
+            peers = cfg.Peers
+            connected = len(list(filter(lambda x: x.status == "running", peers)))
+            wg_configs.append({
+                "name": name,
+                "total_peers": len(peers),
+                "connected_peers": connected
+            })
+            total_peers += len(peers)
+            total_connected += connected
+        except Exception:
+            continue
+    query_stats = _adguard_query_stats(adguard_config.get("querylog_path"))
     data = {
         "services": {
             "wg_dashboard": _service_status("wg-dashboard"),
             "wireguard": _service_status("wg-quick@wg0"),
             "adguard": _service_status("AdGuardHome"),
+        },
+        "wireguard": {
+            "configs": wg_configs,
+            "total_peers": total_peers,
+            "connected_peers": total_connected
         },
         "adguard": {
             "http_address": adguard_config.get("http_address"),
@@ -1822,10 +1978,16 @@ def API_HealthStatus():
             "tls_enabled": adguard_config.get("tls_enabled"),
             "tls_server_name": adguard_config.get("tls_server_name"),
             "tls_port_https": adguard_config.get("tls_port_https"),
+            "querylog_enabled": adguard_config.get("querylog_enabled"),
+            "querylog_file_enabled": adguard_config.get("querylog_file_enabled"),
+            "statistics_enabled": adguard_config.get("statistics_enabled"),
+            "statistics_interval": adguard_config.get("statistics_interval"),
             "config_path": adguard_config.get("path"),
             "error": adguard_config.get("error"),
         },
+        "adguard_query_stats": query_stats,
         "certificate": cert_info,
+        "certificate_renewal": cert_renewal,
         "disk": {
             "mount": "/",
             "total": disk_root.total,
