@@ -1,5 +1,8 @@
 import {DashboardConfigurationStore} from "@/stores/DashboardConfigurationStore.js";
 import router from "@/router/router.js";
+
+const shouldNotifySessionExpired = () => router?.currentRoute?.value?.path !== '/signin';
+const shouldRedirectToSignin = () => router?.currentRoute?.value?.path !== '/signin';
 const getHeaders = () => {
 	let headers = {
 		"Content-Type": "application/json"
@@ -41,7 +44,9 @@ export const fetchGet = async (url, params=undefined, callback=undefined) => {
 			if (!x.ok){
 				if (x.status !== 200){
 					if (x.status === 401){
-						store.newMessage("WGDashboard", "Sign in session ended, please sign in again", "warning")
+						if (shouldNotifySessionExpired()){
+							store.newMessage("WGDashboard", "Sign in session ended, please sign in again", "warning")
+						}
 					}
 					throw new Error(x.statusText)
 				}
@@ -51,7 +56,9 @@ export const fetchGet = async (url, params=undefined, callback=undefined) => {
 		})
 		.then(x => callback ? callback(x) : undefined).catch(x => {
 			console.log("Error:", x)
-			router.push({path: '/signin'})
+			if (shouldRedirectToSignin()){
+				router.push({path: '/signin'})
+			}
 	})
 }
 
@@ -65,7 +72,9 @@ export const fetchPost = async (url, body, callback) => {
 		if (!x.ok){
 			if (x.status !== 200){
 				if (x.status === 401){
-					store.newMessage("WGDashboard", "Sign in session ended, please sign in again", "warning")
+					if (shouldNotifySessionExpired()){
+						store.newMessage("WGDashboard", "Sign in session ended, please sign in again", "warning")
+					}
 				}
 				throw new Error(x.statusText)
 			}
@@ -74,6 +83,8 @@ export const fetchPost = async (url, body, callback) => {
 		}
 	}).then(x => callback ? callback(x) : undefined).catch(x => {
 		console.log("Error:", x)
-		router.push({path: '/signin'})
+		if (shouldRedirectToSignin()){
+			router.push({path: '/signin'})
+		}
 	})
 }
