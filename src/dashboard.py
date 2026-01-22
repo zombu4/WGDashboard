@@ -544,11 +544,15 @@ WireguardConfigurations: dict[str, WireguardConfiguration] = {}
 CONFIGURATION_PATH = os.getenv('CONFIGURATION_PATH', '.')
 
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 60
-app.secret_key = secrets.token_urlsafe(32)
 app.json = CustomJsonEncoder(app)
 with app.app_context():
     SystemStatus = SystemStatus()
     DashboardConfig = DashboardConfig()
+    secret_key = DashboardConfig.GetConfig("Server", "secret_key")[1]
+    if not secret_key:
+        secret_key = secrets.token_urlsafe(32)
+        DashboardConfig.SetConfig("Server", "secret_key", secret_key)
+    app.secret_key = secret_key
     EmailSender = EmailSender(DashboardConfig)
     AllPeerShareLinks: PeerShareLinks = PeerShareLinks(DashboardConfig, WireguardConfigurations)
     AllPeerJobs: PeerJobs = PeerJobs(DashboardConfig, WireguardConfigurations, AllPeerShareLinks)

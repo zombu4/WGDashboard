@@ -25,7 +25,7 @@ class DashboardConfig:
             open(DashboardConfig.ConfigurationFilePath, "x")
         self.__config = configparser.RawConfigParser(strict=False)
         self.__config.read_file(open(DashboardConfig.ConfigurationFilePath, "r+"))
-        self.hiddenAttribute = ["totp_key", "auth_req"]
+        self.hiddenAttribute = ["totp_key", "auth_req", "secret_key"]
         self.__default = {
             "Account": {
                 "username": "admin",
@@ -40,6 +40,7 @@ class DashboardConfig:
                 "app_prefix": "",
                 "app_ip": "0.0.0.0",
                 "app_port": "10086",
+                "secret_key": secrets.token_urlsafe(32),
                 "auth_req": "true",
                 "version": DashboardConfig.DashboardVersion,
                 "dashboard_refresh_interval": "60000",
