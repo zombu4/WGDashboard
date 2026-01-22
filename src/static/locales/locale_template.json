@@ -438,5 +438,18 @@
 	"Assign successfully!": "",
 	"Sessions": "",
 	"Data": "",
-	"Back": ""
+	"Back": "",
+	"Usage Report": "",
+	"Last 7 Days": "",
+	"Last 30 Days": "",
+	"Download CSV": "",
+	"Start Date": "",
+	"End Date": "",
+	"Range Total": "",
+	"Date": "",
+	"Total": "",
+	"Sent": "",
+	"Received": "",
+	"Loading": "",
+	"No data": ""
 }

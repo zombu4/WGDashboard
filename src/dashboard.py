@@ -1,4 +1,6 @@
 import logging
+import csv
+from io import StringIO
 import random, shutil, sqlite3, configparser, hashlib, ipaddress, json, os, secrets, subprocess
 import time, re, uuid, bcrypt, psutil, pyotp, threading
 import traceback
@@ -68,6 +70,22 @@ def ResponseObject(status=True, message=None, data=None, status_code = 200) -> F
     response.status_code = status_code
     response.content_type = "application/json"
     return response
+
+def ParseDateRange(args, max_days: int = 366):
+    start_str = args.get("startDate")
+    end_str = args.get("endDate")
+    if not start_str or not end_str:
+        return False, "Please provide startDate and endDate (YYYY-MM-DD)", None
+    try:
+        start = datetime.strptime(start_str, "%Y-%m-%d").date()
+        end = datetime.strptime(end_str, "%Y-%m-%d").date()
+    except Exception:
+        return False, "Dates must be in YYYY-MM-DD format", None
+    if start > end:
+        return False, "startDate must be smaller than endDate", None
+    if (end - start).days + 1 > max_days:
+        return False, f"Date range too large (max {max_days} days)", None
+    return True, None, (start, end)
 
 '''
 Flask App
@@ -1118,6 +1136,89 @@ def API_GetPeerTraffics():
         return ResponseObject(data=p.getTraffics(interval, startDate, endDate))
     return ResponseObject(False, "Peer does not exist")
 
+@app.get(f'{APP_PREFIX}/api/getPeerUsageReport')
+def API_GetPeerUsageReport():
+    configurationName = request.args.get("configurationName")
+    peer_id = request.args.get('id')
+    if not configurationName or not peer_id:
+        return ResponseObject(False, "Please provide configurationName and id")
+    if configurationName not in WireguardConfigurations.keys():
+        return ResponseObject(False, "Configuration does not exist")
+    ok, message, date_range = ParseDateRange(request.args)
+    if not ok:
+        return ResponseObject(False, message)
+    start_date, end_date = date_range
+    config = WireguardConfigurations.get(configurationName)
+    fp, peer = config.searchPeer(peer_id)
+    if not fp:
+        return ResponseObject(False, "Peer does not exist")
+    usage = config.getPeersUsageRange([peer_id], start_date, end_date).get(peer_id, {})
+    return ResponseObject(data={
+        "peer": {
+            "id": peer_id,
+            "name": peer.name,
+            "configuration_name": configurationName
+        },
+        "range": {
+            "start": start_date.strftime("%Y-%m-%d"),
+            "end": end_date.strftime("%Y-%m-%d")
+        },
+        "total": {
+            "total_gb": usage.get("total", 0),
+            "sent_gb": usage.get("sent", 0),
+            "receive_gb": usage.get("receive", 0)
+        },
+        "daily": [
+            {
+                "date": d.get("date"),
+                "total_gb": d.get("total", 0),
+                "sent_gb": d.get("sent", 0),
+                "receive_gb": d.get("receive", 0)
+            } for d in usage.get("daily", [])
+        ]
+    })
+
+@app.get(f'{APP_PREFIX}/api/getPeerUsageReportCSV')
+def API_GetPeerUsageReportCSV():
+    configurationName = request.args.get("configurationName")
+    peer_id = request.args.get('id')
+    if not configurationName or not peer_id:
+        return ResponseObject(False, "Please provide configurationName and id")
+    if configurationName not in WireguardConfigurations.keys():
+        return ResponseObject(False, "Configuration does not exist")
+    ok, message, date_range = ParseDateRange(request.args)
+    if not ok:
+        return ResponseObject(False, message)
+    start_date, end_date = date_range
+    config = WireguardConfigurations.get(configurationName)
+    fp, peer = config.searchPeer(peer_id)
+    if not fp:
+        return ResponseObject(False, "Peer does not exist")
+    usage = config.getPeersUsageRange([peer_id], start_date, end_date).get(peer_id, {})
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Total_GB", "Sent_GB", "Receive_GB"])
+    for d in usage.get("daily", []):
+        writer.writerow([
+            d.get("date"),
+            f"{(d.get('total', 0) or 0):.6f}",
+            f"{(d.get('sent', 0) or 0):.6f}",
+            f"{(d.get('receive', 0) or 0):.6f}"
+        ])
+    writer.writerow([])
+    writer.writerow([
+        "Total",
+        f"{(usage.get('total', 0) or 0):.6f}",
+        f"{(usage.get('sent', 0) or 0):.6f}",
+        f"{(usage.get('receive', 0) or 0):.6f}"
+    ])
+    response = make_response(output.getvalue())
+    response.headers["Content-Type"] = "text/csv"
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=peer-usage-{configurationName}-{peer_id}-{start_date}-{end_date}.csv"
+    )
+    return response
+
 @app.get(f'{APP_PREFIX}/api/getPeerTrackingTableCounts')
 def API_GetPeerTrackingTableCounts():
     configurationName = request.args.get("configurationName")
@@ -1652,6 +1753,63 @@ def API_Clients_UsageSummary():
     if summary is None:
         return ResponseObject(False, "Client does not exist")
     return ResponseObject(data=summary)
+
+@app.get(f'{APP_PREFIX}/api/clients/usageReport')
+def API_Clients_UsageReport():
+    data = request.args
+    clientId = data.get("ClientID")
+    if not clientId:
+        return ResponseObject(False, "Please provide ClientID")
+    if not DashboardClients.GetClient(clientId):
+        return ResponseObject(False, "Client does not exist")
+    ok, message, date_range = ParseDateRange(request.args)
+    if not ok:
+        return ResponseObject(False, message)
+    start_date, end_date = date_range
+    report = DashboardClients.GetClientUsageReport(clientId, start_date, end_date)
+    if report is None:
+        return ResponseObject(False, "Client does not exist")
+    return ResponseObject(data=report)
+
+@app.get(f'{APP_PREFIX}/api/clients/usageReportCSV')
+def API_Clients_UsageReportCSV():
+    data = request.args
+    clientId = data.get("ClientID")
+    if not clientId:
+        return ResponseObject(False, "Please provide ClientID")
+    if not DashboardClients.GetClient(clientId):
+        return ResponseObject(False, "Client does not exist")
+    ok, message, date_range = ParseDateRange(request.args)
+    if not ok:
+        return ResponseObject(False, message)
+    start_date, end_date = date_range
+    report = DashboardClients.GetClientUsageReport(clientId, start_date, end_date)
+    if report is None:
+        return ResponseObject(False, "Client does not exist")
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Total_GB", "Sent_GB", "Receive_GB"])
+    for d in report.get("daily", []):
+        writer.writerow([
+            d.get("date"),
+            f"{(d.get('total_gb', 0) or 0):.6f}",
+            f"{(d.get('sent_gb', 0) or 0):.6f}",
+            f"{(d.get('receive_gb', 0) or 0):.6f}"
+        ])
+    writer.writerow([])
+    total = report.get("total", {})
+    writer.writerow([
+        "Total",
+        f"{(total.get('total_gb', 0) or 0):.6f}",
+        f"{(total.get('sent_gb', 0) or 0):.6f}",
+        f"{(total.get('receive_gb', 0) or 0):.6f}"
+    ])
+    response = make_response(output.getvalue())
+    response.headers["Content-Type"] = "text/csv"
+    response.headers["Content-Disposition"] = (
+        f"attachment; filename=client-usage-{clientId}-{start_date}-{end_date}.csv"
+    )
+    return response
 
 @app.get(f'{APP_PREFIX}/api/clients/realtimeUsage')
 def API_Clients_RealtimeUsage():

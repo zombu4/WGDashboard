@@ -12,6 +12,7 @@ import ClientAssignedPeers from "@/components/clientComponents/clientAssignedPee
 import ClientResetPassword from "@/components/clientComponents/clientResetPassword.vue";
 import ClientDelete from "@/components/clientComponents/clientDelete.vue";
 import Sparkline from "@/components/visualComponents/sparkline.vue";
+import dayjs from "dayjs";
 const assignmentStore = DashboardClientAssignmentStore()
 const dashboardConfigurationStore = DashboardConfigurationStore()
 
@@ -26,6 +27,9 @@ const realtimeUsage = ref({sent_bps: 0, recv_bps: 0, updated_at: null})
 const realtimeHistory = ref({sent: [], recv: []})
 const rateUnit = ref(window.localStorage.getItem('wgdashboard_rate_unit') || 'Mbps')
 const maxRateSamples = 30
+const usageReport = ref(null)
+const reportStart = ref(dayjs().subtract(6, 'day').format('YYYY-MM-DD'))
+const reportEnd = ref(dayjs().format('YYYY-MM-DD'))
 const getAssignedPeers = async () => {
 	await fetchGet('/api/clients/assignedPeers', {
 		ClientID: client.value.ClientID
@@ -53,6 +57,15 @@ const getRealtimeUsage = async () => {
 		if (realtimeHistory.value.recv.length > maxRateSamples) realtimeHistory.value.recv.shift()
 	})
 }
+const getUsageReport = async () => {
+	await fetchGet('/api/clients/usageReport', {
+		ClientID: client.value.ClientID,
+		startDate: reportStart.value,
+		endDate: reportEnd.value
+	}, (res) => {
+		usageReport.value = res.data || null
+	})
+}
 const emits = defineEmits(['deleteSuccess'])
 
 const clientProfile = reactive({
@@ -77,18 +90,30 @@ const updateRateUnit = (e) => {
 	rateUnit.value = e.target.value
 	window.localStorage.setItem('wgdashboard_rate_unit', rateUnit.value)
 }
+const setReportPreset = (days) => {
+	reportStart.value = dayjs().subtract(days - 1, 'day').format('YYYY-MM-DD')
+	reportEnd.value = dayjs().format('YYYY-MM-DD')
+}
+const downloadUsageCSV = () => {
+	const url = `/api/clients/usageReportCSV?ClientID=${client.value.ClientID}&startDate=${reportStart.value}&endDate=${reportEnd.value}`
+	window.open(url, '_blank')
+}
 
 if (client.value){
 	watch(() => client.value.ClientID, async () => {
 		realtimeHistory.value = {sent: [], recv: []}
+		reportStart.value = dayjs().subtract(6, 'day').format('YYYY-MM-DD')
+		reportEnd.value = dayjs().format('YYYY-MM-DD')
 		clientProfile.Name = client.value.Name;
 		await getAssignedPeers()
 		await getUsageSummary()
 		await getRealtimeUsage()
+		await getUsageReport()
 	})
 	await getAssignedPeers()
 	await getUsageSummary()
 	await getRealtimeUsage()
+	await getUsageReport()
 	clientProfile.Name = client.value.Name
 }else{
 	router.push('/clients')
@@ -130,6 +155,12 @@ setRealtimeInterval()
 onBeforeUnmount(() => {
 	clearInterval(realtimeInterval.value)
 	realtimeInterval.value = undefined
+})
+
+watch([reportStart, reportEnd], async () => {
+	if (client.value){
+		await getUsageReport()
+	}
 })
 
 </script>
@@ -257,6 +288,66 @@ onBeforeUnmount(() => {
 				<small>
 					<LocaleText t="Traffic tracking disabled for"></LocaleText>:
 					{{ usageSummary.tracking_disabled_configurations.join(', ') }}
+				</small>
+			</div>
+		</div>
+		<div class="p-3 border-bottom" v-if="usageReport">
+			<div class="d-flex align-items-center gap-2 mb-2">
+				<h6 class="text-muted mb-0"><LocaleText t="Usage Report"></LocaleText></h6>
+				<button class="btn btn-sm btn-outline-secondary ms-auto" @click="setReportPreset(7)">
+					<LocaleText t="Last 7 Days"></LocaleText>
+				</button>
+				<button class="btn btn-sm btn-outline-secondary" @click="setReportPreset(30)">
+					<LocaleText t="Last 30 Days"></LocaleText>
+				</button>
+				<button class="btn btn-sm btn-outline-primary" @click="downloadUsageCSV">
+					<LocaleText t="Download CSV"></LocaleText>
+				</button>
+			</div>
+			<div class="d-flex flex-wrap gap-2 mb-3">
+				<div>
+					<label class="form-label text-muted mb-1"><small><LocaleText t="Start Date"></LocaleText></small></label>
+					<input type="date" class="form-control form-control-sm" v-model="reportStart">
+				</div>
+				<div>
+					<label class="form-label text-muted mb-1"><small><LocaleText t="End Date"></LocaleText></small></label>
+					<input type="date" class="form-control form-control-sm" v-model="reportEnd">
+				</div>
+				<div class="ms-auto">
+					<label class="form-label text-muted mb-1"><small><LocaleText t="Range Total"></LocaleText></small></label>
+					<div class="small">
+						<strong>{{ (usageReport.total.total_gb || 0).toFixed(4) }}</strong> GB
+						<span class="text-muted ms-2">
+							<LocaleText t="Sent"></LocaleText>: {{ (usageReport.total.sent_gb || 0).toFixed(4) }} GB
+							• <LocaleText t="Received"></LocaleText>: {{ (usageReport.total.receive_gb || 0).toFixed(4) }} GB
+						</span>
+					</div>
+				</div>
+			</div>
+			<div class="table-responsive">
+				<table class="table table-sm table-striped align-middle">
+					<thead>
+						<tr>
+							<th><LocaleText t="Date"></LocaleText></th>
+							<th><LocaleText t="Total"></LocaleText> (GB)</th>
+							<th><LocaleText t="Sent"></LocaleText> (GB)</th>
+							<th><LocaleText t="Received"></LocaleText> (GB)</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="d in usageReport.daily" :key="d.date">
+							<td>{{ d.date }}</td>
+							<td>{{ (d.total_gb || 0).toFixed(4) }}</td>
+							<td>{{ (d.sent_gb || 0).toFixed(4) }}</td>
+							<td>{{ (d.receive_gb || 0).toFixed(4) }}</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+			<div class="alert alert-warning mt-2 mb-0 py-2" v-if="usageReport.tracking_disabled_configurations && usageReport.tracking_disabled_configurations.length">
+				<small>
+					<LocaleText t="Traffic tracking disabled for"></LocaleText>:
+					{{ usageReport.tracking_disabled_configurations.join(', ') }}
 				</small>
 			</div>
 		</div>

@@ -32,6 +32,7 @@ Chart.register(
 import PeerSessions from "@/components/peerDetailsModalComponents/peerSessions.vue";
 import PeerTraffics from "@/components/peerDetailsModalComponents/peerTraffics.vue";
 import PeerEndpoints from "@/components/peerDetailsModalComponents/peerEndpoints.vue";
+import PeerUsageReport from "@/components/peerDetailsModalComponents/peerUsageReport.vue";
 const props = defineProps(['selectedPeer'])
 const selectedDate = ref(undefined)
 defineEmits(['close'])
@@ -158,6 +159,10 @@ defineEmits(['close'])
 										<i class="bi bi-arrow-up ms-auto h2 text-muted"></i>
 									</div>
 								</div>
+							</div>
+							<div class="col-12">
+								<PeerUsageReport
+									:selectedPeer="selectedPeer"></PeerUsageReport>
 							</div>
 							<div class="col-12">
 								<PeerTraffics

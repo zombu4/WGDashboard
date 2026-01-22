@@ -559,6 +559,32 @@ class WireguardConfiguration:
                     "receive": max((row["max_receive"] or 0) - (row["min_receive"] or 0), 0),
                 }
         return usage
+
+    def getPeersUsageRange(self, peer_ids: list[str], start_date: datetime.date, end_date: datetime.date):
+        if not peer_ids:
+            return {}
+        if start_date > end_date:
+            return {pid: {"total": 0, "sent": 0, "receive": 0, "daily": []} for pid in peer_ids}
+
+        days = (end_date - start_date).days + 1
+        usage = {pid: {"total": 0, "sent": 0, "receive": 0, "daily": []} for pid in peer_ids}
+
+        for offset in range(days):
+            day = start_date + timedelta(days=offset)
+            daily_usage = self.getPeersDailyUsage(peer_ids, day)
+            day_str = day.strftime("%Y-%m-%d")
+            for pid in peer_ids:
+                values = daily_usage.get(pid, {"total": 0, "sent": 0, "receive": 0})
+                usage[pid]["daily"].append({
+                    "date": day_str,
+                    "total": values.get("total", 0),
+                    "sent": values.get("sent", 0),
+                    "receive": values.get("receive", 0)
+                })
+                usage[pid]["total"] += values.get("total", 0) or 0
+                usage[pid]["sent"] += values.get("sent", 0) or 0
+                usage[pid]["receive"] += values.get("receive", 0) or 0
+        return usage
     
     def logPeersHistoryEndpoint(self):
         with self.engine.begin() as conn:

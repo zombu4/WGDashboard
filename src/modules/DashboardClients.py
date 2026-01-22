@@ -525,6 +525,63 @@ class DashboardClients:
             "tracking_disabled_configurations": tracking_disabled
         }
 
+    def GetClientUsageReport(self, ClientID, start_date: datetime.date, end_date: datetime.date):
+        client = self.GetClient(ClientID)
+        if client is None:
+            return None
+        peers = self.DashboardClientsPeerAssignment.GetAssignedPeers(ClientID)
+        peer_meta = {p.get("id"): p for p in peers}
+        usage_by_peer, tracking_disabled = self.DashboardClientsPeerAssignment.GetAssignedPeersUsageRange(
+            ClientID, start_date, end_date
+        )
+
+        days = (end_date - start_date).days + 1
+        daily = []
+        for offset in range(days):
+            d = start_date + datetime.timedelta(days=offset)
+            daily.append({
+                "date": d.strftime("%Y-%m-%d"),
+                "total_gb": 0,
+                "sent_gb": 0,
+                "receive_gb": 0
+            })
+
+        peers_report = []
+        total_range = {"total_gb": 0, "sent_gb": 0, "receive_gb": 0}
+        for pid, usage in usage_by_peer.items():
+            meta = peer_meta.get(pid, {})
+            peers_report.append({
+                "id": pid,
+                "name": meta.get("name"),
+                "configuration_name": meta.get("configuration_name"),
+                "total_gb": usage.get("total", 0),
+                "sent_gb": usage.get("sent", 0),
+                "receive_gb": usage.get("receive", 0)
+            })
+            total_range["total_gb"] += usage.get("total", 0) or 0
+            total_range["sent_gb"] += usage.get("sent", 0) or 0
+            total_range["receive_gb"] += usage.get("receive", 0) or 0
+
+            for idx, day_usage in enumerate(usage.get("daily", [])):
+                if idx < len(daily):
+                    daily[idx]["total_gb"] += day_usage.get("total", 0) or 0
+                    daily[idx]["sent_gb"] += day_usage.get("sent", 0) or 0
+                    daily[idx]["receive_gb"] += day_usage.get("receive", 0) or 0
+
+        return {
+            "client_id": ClientID,
+            "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "range": {
+                "start": start_date.strftime("%Y-%m-%d"),
+                "end": end_date.strftime("%Y-%m-%d")
+            },
+            "peers_count": len(peers),
+            "total": total_range,
+            "daily": daily,
+            "peers": peers_report,
+            "tracking_disabled_configurations": tracking_disabled
+        }
+
     def AssignClient(self, ConfigurationName, PeerID, ClientID) -> tuple[bool, dict[str, str]] | tuple[bool, None]:
         return self.DashboardClientsPeerAssignment.AssignClient(ClientID, ConfigurationName, PeerID) 
     
