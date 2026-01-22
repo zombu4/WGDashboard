@@ -413,18 +413,13 @@ class WireguardConfiguration:
         return changed
 
     def getPeers(self):
-        tmpList = []
-        def load_from_db():
-            with self.engine.connect() as conn:
-                existingPeers = conn.execute(self.peersTable.select()).mappings().fetchall()
-                for i in existingPeers:
-                    tmpList.append(Peer(i, self))
+        tmpList = []        
         if self.configurationFileChanged():
-            try:
-                with open(self.configPath, 'r') as configFile:
-                    p = []
-                    pCounter = -1
-                    content = configFile.read().split('\n')
+            with open(self.configPath, 'r') as configFile:
+                p = []
+                pCounter = -1
+                content = configFile.read().split('\n')
+                try:
                     if "[Peer]" not in content:
                         current_app.logger.info(f"{self.Name} config has no [Peer] section")
                         return
@@ -495,14 +490,13 @@ class WireguardConfiguration:
                                         )
                                     )
                             tmpList.append(Peer(tempPeer, self))
-            except PermissionError as e:
-                current_app.logger.error(f"{self.Name} getPeers() PermissionError", e)
-                load_from_db()
-            except Exception as e:
-                current_app.logger.error(f"{self.Name} getPeers() Error", e)
-                load_from_db()
+                except Exception as e:
+                    current_app.logger.error(f"{self.Name} getPeers() Error", e)
         else:
-            load_from_db()
+            with self.engine.connect() as conn:
+                existingPeers = conn.execute(self.peersTable.select()).mappings().fetchall()
+                for i in existingPeers:
+                    tmpList.append(Peer(i, self))
         self.Peers = tmpList
     
     def logPeersTraffic(self):
