@@ -258,6 +258,28 @@ def _tail_lines(path, max_lines=2000, max_bytes=2 * 1024 * 1024):
     except Exception:
         return []
 
+def _parse_adguard_timestamp(ts_raw):
+    try:
+        if not ts_raw:
+            return None
+        if ts_raw.endswith("Z"):
+            ts_raw = ts_raw[:-1] + "+00:00"
+        if "." in ts_raw:
+            head, tail = ts_raw.split(".", 1)
+            frac = tail
+            tz_part = ""
+            if "+" in tail:
+                frac, tz_part = tail.split("+", 1)
+                tz_part = "+" + tz_part
+            elif "-" in tail and tail.count("-") >= 1:
+                idx = tail.rfind("-")
+                frac, tz_part = tail[:idx], tail[idx:]
+            frac = frac[:6]
+            ts_raw = f"{head}.{frac}{tz_part}"
+        return datetime.fromisoformat(ts_raw)
+    except Exception:
+        return None
+
 def _adguard_query_stats(querylog_path, window_minutes=60, max_lines=2000):
     stats = {
         "status": "unavailable",
@@ -287,8 +309,8 @@ def _adguard_query_stats(querylog_path, window_minutes=60, max_lines=2000):
             try:
                 entry = json.loads(line)
                 ts_raw = entry.get("T")
-                if ts_raw:
-                    ts = datetime.fromisoformat(ts_raw)
+                ts = _parse_adguard_timestamp(ts_raw)
+                if ts:
                     if ts.tzinfo is None:
                         ts = ts.replace(tzinfo=timezone.utc)
                     if last_ts is None or ts > last_ts:
@@ -357,6 +379,12 @@ def _cert_renewal_status():
         except Exception as e:
             status["error"] = str(e)
     return status
+
+_health_cache = {
+    "timestamp": 0,
+    "data": None
+}
+_health_cache_lock = threading.Lock()
 
 '''
 Flask App
@@ -1939,6 +1967,10 @@ def API_SystemStatus():
 
 @app.get(f'{APP_PREFIX}/api/healthStatus')
 def API_HealthStatus():
+    now_ts = time.time()
+    with _health_cache_lock:
+        if _health_cache["data"] is not None and (now_ts - _health_cache["timestamp"]) < 30:
+            return ResponseObject(data=_health_cache["data"])
     adguard_config = _read_adguard_config()
     cert_info = _cert_expiry(adguard_config.get("certificate_path"))
     cert_renewal = _cert_renewal_status()
@@ -1996,6 +2028,9 @@ def API_HealthStatus():
             "percent": disk_root.percent,
         },
     }
+    with _health_cache_lock:
+        _health_cache["timestamp"] = time.time()
+        _health_cache["data"] = data
     return ResponseObject(data=data)
 
 @app.get(f'{APP_PREFIX}/api/auditLog')
