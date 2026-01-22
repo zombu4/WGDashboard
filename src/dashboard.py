@@ -206,7 +206,7 @@ dictConfig({
 WireguardConfigurations: dict[str, WireguardConfiguration] = {}
 CONFIGURATION_PATH = os.getenv('CONFIGURATION_PATH', '.')
 
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 5206928
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 300
 app.secret_key = secrets.token_urlsafe(32)
 app.json = CustomJsonEncoder(app)
 with app.app_context():
