@@ -335,6 +335,35 @@ def _adguard_query_stats(querylog_path, window_minutes=60, max_lines=2000):
         return stats
 
 def _cert_renewal_status():
+    def _load_timer_list():
+        try:
+            proc = subprocess.run(
+                ["systemctl", "list-timers", "--all", "--output=json"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if proc.returncode != 0 or not proc.stdout.strip():
+                return {}
+            entries = json.loads(proc.stdout)
+            timers = {}
+            for entry in entries:
+                unit = entry.get("unit")
+                if unit:
+                    timers[unit] = entry
+            return timers
+        except Exception:
+            return {}
+
+    def _format_timer_usec(usec):
+        try:
+            if usec is None or usec == 0:
+                return None
+            return datetime.fromtimestamp(usec / 1_000_000, tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        except Exception:
+            return None
+
     status = {
         "method": "none",
         "timer_unit": None,
@@ -343,7 +372,8 @@ def _cert_renewal_status():
         "last_run": None,
         "error": None,
     }
-    timer_units = ["certbot.timer", "certbot-renew.timer", "certbot_renew.timer"]
+    timer_units = ["certbot-renew-7days.timer", "certbot.timer", "certbot-renew.timer", "certbot_renew.timer"]
+    timer_list = None
     for unit in timer_units:
         proc = subprocess.run(
             ["systemctl", "show", unit, "-p", "LoadState", "-p", "ActiveState",
@@ -362,8 +392,16 @@ def _cert_renewal_status():
             status["method"] = "systemd"
             status["timer_unit"] = unit
             status["active"] = props.get("ActiveState")
-            status["next_run"] = props.get("NextElapseUSecRealtime")
-            status["last_run"] = props.get("LastTriggerUSecRealtime")
+            status["next_run"] = props.get("NextElapseUSecRealtime") or None
+            status["last_run"] = props.get("LastTriggerUSecRealtime") or None
+            if not status["next_run"] or not status["last_run"]:
+                if timer_list is None:
+                    timer_list = _load_timer_list()
+                timer_entry = timer_list.get(unit, {}) if timer_list else {}
+                if not status["next_run"]:
+                    status["next_run"] = _format_timer_usec(timer_entry.get("next"))
+                if not status["last_run"]:
+                    status["last_run"] = _format_timer_usec(timer_entry.get("last"))
             return status
     cron_path = "/etc/cron.d/certbot"
     if os.path.isfile(cron_path):
